@@ -1,0 +1,22 @@
+[package]
+name = "llama_edge_agent"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["lib"]
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenv = "0.15.0"
+rustpython = { version = "0.3.1", default-features = false, features = ["encodings", "stdlib"] }
+regex = "1.10.4"
+futures = "0.3.30"
+lazy_static = "1.4.0"
+rusqlite = { version = "0.28", features = ["bundled"] }
+libsqlite3-sys = { version = "0.25", features = ["min_sqlite_version_3_7_16", "bundled"] }
