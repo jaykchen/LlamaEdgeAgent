@@ -2,12 +2,14 @@ pub mod exec_python;
 use exec_python::run_python_capture;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use serde_json::Value;
+use std::sync::{ Arc, Mutex };
+use serde_json::{Value, json};
+use serde::{ Serialize, Deserialize };
 use flowsnet_platform_sdk::logger;
 use webhook_flows::{
-    create_endpoint, request_handler,
-    route::{get, post, route, RouteError, Router},
+    create_endpoint,
+    request_handler,
+    route::{ get, post, route, RouteError, Router },
     send_response,
 };
 use dotenv::dotenv;
@@ -25,12 +27,12 @@ async fn handler(
     _headers: Vec<(String, String)>,
     _subpath: String,
     _qry: HashMap<String, Value>,
-    _body: Vec<u8>,
+    _body: Vec<u8>
 ) {
     dotenv().ok();
     logger::init();
     let mut router = Router::new();
-    router.insert("/run", vec![post(inner)]).unwrap();
+    router.insert("/run", vec![post(run_code_by_post_handler)]).unwrap();
     if let Err(e) = route(router).await {
         match e {
             RouteError::NotFound => {
@@ -43,12 +45,37 @@ async fn handler(
     }
 }
 
-async fn inner(_headers: Vec<(String, String)>, _qry: HashMap<String, Value>, _body: Vec<u8>) {
-    let code = r#"print("hello world")"#;
+async fn run_code_by_post_handler(
+    _headers: Vec<(String, String)>,
+    _qry: HashMap<String, Value>,
+    _body: Vec<u8>
+) {
+    #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+    pub struct AgentLoad {
+        pub code: Option<String>,
+        pub holder: Option<String>,
+        pub text: Option<String>,
+    }
 
-    let res = run_python_capture(&code);
-
-    log::info!("hello");
+    let load: AgentLoad = match serde_json::from_slice(&_body) {
+        Ok(obj) => obj,
+        Err(_e) => {
+            log::error!("failed to parse body: {}", _e);
+            return;
+        }
+    };
+    if let Some(code) = load.code {
+        let res = run_python_capture(&code);
+        log::info!("{:?}", res.clone());
+        send_response(
+            200,
+            vec![
+                (String::from("content-type"), String::from("application/json")),
+                (String::from("Access-Control-Allow-Origin"), String::from("*"))
+            ],
+            json!(res).to_string().as_bytes().to_vec()
+        );
+    }
 }
 
 lazy_static! {
