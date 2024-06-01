@@ -70,7 +70,7 @@ pub fn extract_code(text: &str) -> String {
 
 pub fn extract_code_blocks(
     text: &str,
-    detect_single_line_code: bool
+    detect_single_line_code: bool,
 ) -> Vec<(Option<String>, String)> {
     // Adjust regex pattern to handle both Unix and Windows line endings and optional language specifier
     let multi_line_pattern = r"```[ \t]*(\w+)?[ \t]*\r?\n(.*?)\r?\n[ \t]*```";
@@ -79,7 +79,9 @@ pub fn extract_code_blocks(
 
     let multi_line_regex = Regex::new(multi_line_pattern).unwrap();
     for cap in multi_line_regex.captures_iter(text) {
-        let language = cap.get(1).map_or(None, |m| Some(m.as_str().trim().to_string()));
+        let language = cap
+            .get(1)
+            .map_or(None, |m| Some(m.as_str().trim().to_string()));
         let code = cap.get(2).unwrap().as_str().trim().to_string();
         results.push((language.clone(), code.clone()));
         // println!("Matched multi-line code block: Language: {:?}, Code: {}", language, code);
