@@ -1,3 +1,10 @@
 .env
 /target
 Cargo.lock
+agent.wasm
+llama-chat.wasm
+Meta-Llama-3-8B-Instruct-Q5_K_M.gguf
+gemma-2b-it-Q5_K_M.gguf
+/api-server
+/assets
+/chat
