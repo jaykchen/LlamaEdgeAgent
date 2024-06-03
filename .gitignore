@@ -8,3 +8,6 @@ gemma-2b-it-Q5_K_M.gguf
 /api-server
 /assets
 /chat
+agent/target
+agent/.env
+agent/Cargo.lock

@@ -1,17 +1,16 @@
-use anyhow::bail;
 use chat_prompts::PromptTemplateType;
 use clap::Parser;
+use llama_agent::immutable_agent::*;
 use endpoints::chat::{
-    ChatCompletionChunk, ChatCompletionRequestBuilder, ChatCompletionRequestMessage,
-    ChatCompletionRequestSampling, ChatCompletionUserMessageContent,
+    ChatCompletionRequestBuilder,
+    ChatCompletionRequestMessage,
+    ChatCompletionRequestSampling,
 };
-use futures::TryStreamExt;
-use llama_core::{init_core_context, MetadataBuilder};
-use serde::{Deserialize, Serialize};
-use std::io::{self, Write};
+use llama_core::{ init_core_context, MetadataBuilder };
+use serde::{ Deserialize, Serialize };
 
 #[derive(Debug, Parser)]
-#[command(author, about, version, long_about=None)]
+#[command(author, about, version, long_about = None)]
 struct Cli {
     /// Model name
     #[arg(short, long, default_value = "default")]
@@ -83,17 +82,13 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // log version
-    log(format!(
-        "\n[INFO] llama-chat version: {}",
-        env!("CARGO_PKG_VERSION")
-    ));
+    log(format!("\n[INFO] llama-chat version: {}", env!("CARGO_PKG_VERSION")));
 
     // log the cli options
     log(format!("[INFO] Model name: {}", &cli.model_name));
     log(format!("[INFO] Model alias: {}", &cli.model_alias));
     log(format!("[INFO] Prompt template: {}", &cli.prompt_template));
-    // ctx size
-    log(format!("[INFO] Context size: {}", &cli.ctx_size));
+
     // reverse prompt
     if let Some(reverse_prompt) = &cli.reverse_prompt {
         log(format!("[INFO] reverse prompt: {}", reverse_prompt));
@@ -102,54 +97,11 @@ async fn main() -> anyhow::Result<()> {
     if let Some(system_prompt) = &cli.system_prompt {
         log(format!("[INFO] system prompt: {}", system_prompt));
     }
-    // n_predict
-    log(format!(
-        "[INFO] Number of tokens to predict: {}",
-        &cli.n_predict
-    ));
-    // n_gpu_layers
-    log(format!(
-        "[INFO] Number of layers to run on the GPU: {}",
-        &cli.n_gpu_layers
-    ));
-    // batch size
-    log(format!(
-        "[INFO] Batch size for prompt processing: {}",
-        &cli.batch_size
-    ));
-    // temp and top_p
-    if cli.temp.is_none() && cli.top_p.is_none() {
-        let temp = 1.0;
-        log(format!("[INFO] Temperature for sampling: {}", temp));
-    } else if let Some(temp) = cli.temp {
-        log(format!("[INFO] Temperature for sampling: {}", temp));
-    } else if let Some(top_p) = cli.top_p {
-        log(format!("[INFO] Top-p sampling (1.0 = disabled): {}", top_p));
-    }
-    // repeat penalty
-    log(format!(
-        "[INFO] Penalize repeat sequence of tokens: {}",
-        &cli.repeat_penalty
-    ));
-    // presence penalty
-    log(format!(
-        "[INFO] Presence penalty (0.0 = disabled): {}",
-        &cli.presence_penalty
-    ));
-    // frequency penalty
-    log(format!(
-        "[INFO] Frequency penalty (0.0 = disabled): {}",
-        &cli.frequency_penalty
-    ));
-    // log prompts
-    log(format!("[INFO] Enable prompt log: {}", &cli.log_prompts));
-    // log statistics
-    log(format!("[INFO] Enable plugin log: {}", &cli.log_stat));
 
     // create a MetadataBuilder instance
     let builder = MetadataBuilder::new(&cli.model_name, &cli.model_alias, cli.prompt_template)
-        .with_ctx_size(cli.ctx_size)
-        .with_n_predict(cli.n_predict)
+        .with_ctx_size(8192)
+        .with_n_predict(999)
         .with_n_gpu_layers(cli.n_gpu_layers)
         .with_batch_size(cli.batch_size)
         .with_repeat_penalty(cli.repeat_penalty)
@@ -158,23 +110,9 @@ async fn main() -> anyhow::Result<()> {
         .with_reverse_prompt(cli.reverse_prompt)
         .enable_prompts_log(cli.log_prompts || cli.log_all)
         .enable_plugin_log(cli.log_stat || cli.log_all)
-        .enable_debug_log(plugin_debug);
-    // temp and top_p
-    let builder = if cli.temp.is_none() && cli.top_p.is_none() {
-        let temp = 1.0;
-        log(format!("[INFO] Temperature for sampling: {}", temp));
-        builder.with_temperature(temp)
-    } else if let Some(temp) = cli.temp {
-        log(format!("[INFO] Temperature for sampling: {}", temp));
-        builder.with_temperature(temp)
-    } else if let Some(top_p) = cli.top_p {
-        log(format!("[INFO] Top-p sampling (1.0 = disabled): {}", top_p));
-        builder.with_top_p(top_p)
-    } else {
-        let temp = cli.temp.unwrap();
-        log(format!("[INFO] Temperature for sampling: {}", temp));
-        builder.with_temperature(temp)
-    };
+        .enable_debug_log(plugin_debug)
+        .with_temperature(0.1)
+        .with_top_p(1.0);
     // create a Metadata instance
     let metadata = builder.build();
 
@@ -183,11 +121,13 @@ async fn main() -> anyhow::Result<()> {
 
     // get the plugin version info
     let plugin_info = llama_core::get_plugin_info()?;
-    log(format!(
-        "[INFO] Wasi-nn-ggml plugin: b{build_number} (commit {commit_id})",
-        build_number = plugin_info.build_number,
-        commit_id = plugin_info.commit_id,
-    ));
+    log(
+        format!(
+            "[INFO] Wasi-nn-ggml plugin: b{build_number} (commit {commit_id})",
+            build_number = plugin_info.build_number,
+            commit_id = plugin_info.commit_id
+        )
+    );
 
     // create a ChatCompletionRequestSampling instance
     let sampling = if cli.temp.is_none() && cli.top_p.is_none() {
@@ -216,24 +156,27 @@ async fn main() -> anyhow::Result<()> {
         chat_request.messages.push(system_message);
     }
 
-    let readme = "
+    let readme =
+        "
 ================================== Running in interactive mode. ===================================\n
     - Press [Ctrl+C] to interject at any time.
     - Press [Return] to end the input.
     - For multi-line inputs, end each line with '\\' and press [Return] to get another line.\n";
     log(readme);
 
+    let user_proxy = ImmutableAgent::simple("user_proxy", "you're user_proxy");
+
     loop {
         println!("\n[You]: ");
         let user_input = read_input();
 
         // put the user message into the messages sequence of chat_request
-        let user_message = ChatCompletionRequestMessage::new_user_message(
-            ChatCompletionUserMessageContent::Text(user_input),
-            None,
-        );
+        // let user_message = ChatCompletionRequestMessage::new_user_message(
+        //     ChatCompletionUserMessageContent::Text(user_input),
+        //     None
+        // );
 
-        chat_request.messages.push(user_message);
+        // chat_request.messages.push(user_message);
 
         if cli.log_stat || cli.log_all {
             print_log_begin_separator("STATISTICS (Set Input)", Some("*"), None);
@@ -244,51 +187,49 @@ async fn main() -> anyhow::Result<()> {
         }
 
         println!("\n[Bot]:");
-        let mut assistant_answer = String::new();
-        match chat_request.stream {
-            Some(true) => {
-                match llama_core::chat::chat_completions_stream(&mut chat_request).await {
-                    Ok(mut stream) => {
-                        while let Some(data) = stream.try_next().await? {
-                            if let Some(chunk) = parse_sse_event(&data) {
-                                if let Some(content) = &chunk.choices[0].delta.content {
-                                    if content.is_empty() {
-                                        continue;
-                                    }
-                                    if assistant_answer.is_empty() {
-                                        let content = content.trim_start();
-                                        print!("{}", content);
-                                        assistant_answer.push_str(content);
-                                    } else {
-                                        print!("{content}");
-                                        assistant_answer.push_str(content);
-                                    }
-                                    io::stdout().flush().unwrap();
-                                }
-                            }
-                        }
-                        println!();
-                    }
-                    Err(e) => bail!("Fail to generate completion. Reason: {msg}", msg = e),
-                };
-            }
-            Some(false) | None => {
-                let chat_completion =
-                    match llama_core::chat::chat_completions(&mut chat_request).await {
-                        Ok(completion) => completion.choices[0].message.content.to_owned(),
-                        Err(e) => bail!("Fail to generate completion. Reason: {msg}", msg = e),
-                    };
-                println!("{chat_completion}");
-                assistant_answer = chat_completion;
-            }
-        }
 
-        let assistant_message = ChatCompletionRequestMessage::new_assistant_message(
-            Some(assistant_answer.trim().to_string()),
-            None,
-            None,
-        );
-        chat_request.messages.push(assistant_message);
+        let task_vec = user_proxy.planning(&mut chat_request, &user_input).await;
+
+        let o = user_proxy.stepper(&mut chat_request, &task_vec).await;
+
+        println!("{:?}", o);
+
+        // let mut assistant_answer = String::new();
+
+        // let res = chat_completions_full(
+        //     &mut chat_request,
+        //     "You're a joyful assisant",
+        //     &user_input
+        // ).await?;
+
+        // let assistant_answer = res.content_to_string();
+
+        // match llama_core::chat::chat_completions(&mut chat_request).await {
+        //     Ok(chunk) => {
+        //         let content = &chunk.choices[0].message.content;
+        //         if content.is_empty() {
+        //             continue;
+        //         }
+        //         if assistant_answer.is_empty() {
+        //             let content = content.trim_start();
+        //             print!("{}", content);
+        //             assistant_answer.push_str(content);
+        //         } else {
+        //             print!("{content}");
+        //             assistant_answer.push_str(content);
+        //         }
+        //         io::stdout().flush().unwrap();
+        //         println!();
+        //     }
+        //     Err(e) => bail!("Fail to generate completion. Reason: {msg}", msg = e),
+        // }
+
+        // let assistant_message = ChatCompletionRequestMessage::new_assistant_message(
+        //     Some(assistant_answer),
+        //     None,
+        //     None
+        // );
+        // chat_request.messages.push(assistant_message);
     }
 
     Ok(())
@@ -310,9 +251,7 @@ fn read_input() -> String {
     let mut answer = String::new();
     loop {
         let mut temp = String::new();
-        std::io::stdin()
-            .read_line(&mut temp)
-            .expect("The read bytes are not valid UTF-8");
+        std::io::stdin().read_line(&mut temp).expect("The read bytes are not valid UTF-8");
 
         if temp.ends_with("\\\n") {
             temp.pop();
@@ -332,7 +271,7 @@ fn read_input() -> String {
 fn print_log_begin_separator(
     title: impl AsRef<str>,
     ch: Option<&str>,
-    len: Option<usize>,
+    len: Option<usize>
 ) -> usize {
     let title = format!(" [LOG: {}] ", title.as_ref());
 
@@ -404,37 +343,4 @@ pub struct Metadata {
 
 fn log(msg: impl std::fmt::Display) {
     println!("{}", msg);
-}
-
-fn parse_sse_event(s: &str) -> Option<ChatCompletionChunk> {
-    let lines: Vec<&str> = s.split('\n').collect();
-    // let mutevent = None;
-    let mut data = None;
-
-    for line in lines {
-        if line.starts_with("data:") {
-            data = Some(line.trim_start_matches("data:").trim());
-        }
-    }
-
-    match data {
-        Some(s) => {
-            if s.trim() == "[DONE]" {
-                return None;
-            }
-
-            match serde_json::from_str(s) {
-                Ok(chunk) => Some(chunk),
-                Err(e) => {
-                    log(format!(
-                        "[ERROR] Fail to parse SSE data. Reason: {msg}. Data: {data}",
-                        msg = e,
-                        data = s
-                    ));
-                    None
-                }
-            }
-        }
-        _ => None,
-    }
 }
