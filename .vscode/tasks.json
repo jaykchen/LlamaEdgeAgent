@@ -4,7 +4,7 @@
         {
             "label": "Build and Move WASM",
             "type": "shell",
-            "command": "cargo build --release --target wasm32-wasi && mv ./target/wasm32-wasi/release/llama_edge_agent.wasm ./ && mv ./target/wasm32-wasi/release/agent.wasm ./",
+            "command": "cargo build --manifest-path ./agent/Cargo.toml --release --target wasm32-wasi && mv ./agent/target/wasm32-wasi/release/llama-agent.wasm ./",
             "group": {
                 "kind": "build",
                 "isDefault": true

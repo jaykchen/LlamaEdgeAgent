@@ -1,4 +1,0 @@
-[build]
-target = "wasm32-wasi"
-# mv ./target/wasm32-wasi/release/llama_edge_agent.wasm ./
-# mv ./target/wasm32-wasi/release/agent.wasm ./
