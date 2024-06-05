@@ -1,163 +1,17 @@
 pub mod exec_python;
+pub mod immutable_agent;
 pub mod nous_structs;
 pub mod utils;
-pub mod immutable_agent;
 pub mod webscraper_hook;
-// pub mod llm_llama_local;
-use serde::{ Deserialize, Serialize };
-use serde_json::{ Value };
-use std::collections::HashMap;
-use std::sync::{ Arc, Mutex };
+use std::sync::{Arc, Mutex};
 
 type FormatterFn = Box<dyn (Fn(&[&str]) -> String) + Send + Sync>;
-
-// #[no_mangle]
-// #[tokio::main(flavor = "current_thread")]
-// pub async fn on_deploy() {
-//     create_endpoint().await;
-// }
-
-// #[request_handler(get)]
-// async fn handler(
-//     _headers: Vec<(String, String)>,
-//     _subpath: String,
-//     _qry: HashMap<String, Value>,
-//     _body: Vec<u8>,
-// ) {
-//     dotenv().ok();
-//     let mut router = Router::new();
-//     router
-//         .insert("/run", vec![post(run_code_by_post_handler)])
-//         .unwrap();
-//     if let Err(e) = route(router).await {
-//         match e {
-//             RouteError::NotFound => {
-//                 send_response(404, vec![], b"No route matched".to_vec());
-//             }
-//             RouteError::MethodNotAllowed => {
-//                 send_response(405, vec![], b"Method not allowed".to_vec());
-//             }
-//         }
-//     }
-// }
-
-async fn _run_code_by_post_handler(
-    _headers: Vec<(String, String)>,
-    _qry: HashMap<String, Value>,
-    _body: Vec<u8>
-) {
-    #[derive(Serialize, Deserialize, Clone, Debug, Default)]
-    pub struct AgentLoad {
-        pub code: Option<String>,
-        pub holder: Option<String>,
-        pub text: Option<String>,
-    }
-
-    let load: AgentLoad = match serde_json::from_slice(&_body) {
-        Ok(obj) => obj,
-        Err(_e) => {
-            return;
-        }
-    };
-    if let Some(_code) = load.code {
-        todo!();
-        // log::info!("{:?}", res.clone());
-        // send_response(
-        //     200,
-        //     vec![
-        //         (String::from("content-type"), String::from("application/json")),
-        //         (String::from("Access-Control-Allow-Origin"), String::from("*"))
-        //     ],
-        //     json!(res).to_string().as_bytes().to_vec()
-        // );
-    }
-}
-
+use chrono::Utc;
 use lazy_static::lazy_static;
-
-static _TEMPLATE_PROMPT: &'static str =
-    r#"
-I'm creating a large language model prompt that use these strategies:
-1. Goal directed planning
-2. Chain of thoughts/think step by step
-3. Use template to record and guide thought process
-4. Direct model to fill in the desired final reply in template
-
-Need you to do polishing over these modular sections according to the raw material 
-// below is the task description, some steps layed out already, but there may be steps missing, and the break down of the steps may not be ideal and the wording/logic may need touching up
-
-You are an AI assistant. Your task is to determine whether a question requires grounding in real-world date, time, location, physics.
-
-// here is guideline on how to think through the task step by step, 
-When given a task, please follow these steps to think it through and then act:
-
-Identify Temporal Relevance: Determine if the question requires current or time-sensitive information. Today's date is 2024-06-01.
-Check for Location Specificity: Identify if the question is location-specific.
-If the answer depends on real-time data or specific locations, suggest using today's date to cross-validate its reply; otherwise, suggest sources to get grounding data.
-Remember that you are a dispatcher; you DO NOT work on tasks yourself.
-
-//here are the templates to record and guide agent to write down its thoughts, based on the handling of certain tasks
-In your reply, list out your think-aloud steps clearly:
-
-Example 1:
-
-When tasked with "What is the weather like in New York?" reshape your answer as follows:
-
-{{
-    \"my_thought_process\": [
-     \"my_goal\": \"goal is to identify whether grounding is needed for this task\",
-       \"Determine if the question requires current or time-sensitive information: YES\",
-        \"Provide assistance to agent for this task grounding information: today's date is xxxx-xx-xx \",
-        \"Echo original input verbatim in key_points section\"
-    ],
-    \"key_points\": [\"today's date is xxxx-xx-xx, What is the weather like in New York\"]
-}}
-
-Example 2:
-
-When tasked with "Who killed John Lennon?" reshape your answer as follows:
-
-{{
-    \"my_thought_process\": [
-    \"my_goal\": \"goal is to identify whether grounding is needed for this task\",
-        \"Determine if the question requires current or time-sensitive information: NO\",
-        \"Echo original input verbatim in key_points section\"
-    ],
-    \"key_points\": [\"Who killed John Lennon?"]
-}}
-
-
-//here is the template for agent to record the final result that the user is hoping for, you don't need to touch it
-Use this format for your response:
-```json
-{
-"my_thought_process": [
-"thought_process_one: my judgement at this step",
-"...",
-"though_process_N: : my judgement at this step"
-],
-\"grounded_or_not\": \"YES\" or \"NO\",
-\"key_points\": [\"point1\", \"point2\", ...]
-}
-```
-"#;
+use once_cell::sync::Lazy;
 
 lazy_static! {
-    pub static ref USER_PROXY_SYSTEM_PROMPT: String =
-        r#"
-        You are a helpful AI assistant acting as the user's proxy. You act according to these rules:
-1. When you receive an instruction from the user, you dispatch the task to an agent in the pool of agents.
-2. When you receive agent's answer, you will judge whether the task has been completed, if not done, dispatch it to an agent to further work on it. If done, mark it as "TERMINATE" and save the result for view by the user.
-please also extract key points of the result and put them in your reply in the following format:
-    ```json
-    {
-        "continue_or_terminate": "TERMINATE" or "CONTINUE",
-        "key_points": "key points"
-    }
-    ```
-    "#.to_string();
-
-    pub static ref IS_TERMINATION_SYSTEM_PROMPT: String =
+    pub static ref IS_TERMINATION_PROMPT: String =
         r#"
     You are a helpful AI assistant acting as a gatekeeper in a project. You will be given a task instruction and the current result, please decide whether the task is done or not, please also extract key points of current result and put them in your reply in the following format:
     ```json
@@ -195,110 +49,7 @@ When summarizing chat history, ensure to include:
 - Discard low-relevancy record from history.
 - Identify any patterns."#.to_string();
 
-    pub static ref ROUTER_AGENT_SYSTEM_PROMPT: String =
-        r#"
-You are a helpful AI assistant acting as a discussion moderator or speaker selector. You will read descriptions of several agents and their abilities, examine the task instruction and the current result, and decide whether the task is done or needs further work. The descriptions of the agents are as follows:
-
-1. **router_agent**: Efficiently manages and directs tasks to appropriate agents based on evaluation criteria.
-2. **coding_agent**: Specializes in generating clean, executable Python code for various tasks.
-3. **user_proxy**: Represents the user by delegating tasks to agents, reviewing their outputs, and ensuring tasks meet user requirements.
-        
-Use the following format to reply:
-```json
-{
-    "continue_or_terminate": "TERMINATE" or "CONTINUE",
-    "next_speaker": "some_speaker" or empty in case "TERMINATE" in the previous field
-}
-```
-    "#.to_string();
-    // Follow these guidelines:"#.to_string();
-
-    pub static ref PLANNING_SYSTEM_PROMPT: String =
-        r#"
-You are a helpful AI assistant with extensive capabilities:
-You can answer many questions and provide a wealth of knowledge from within yourself.
-You have several built-in tools:
-- The function "code_with_python" generates and executes Python code for various tasks based on user input, it's extremely powerful, it can complete all coding related tasks in one step.
-- The function "get_webpage_text" retrieves all text content from a given URL.
-- The function "search_with_bing" performs an internet search using Bing and returns relevant results based on the query provided by the user.
-
-When given a task, please follow these steps to think it through and then act:
-1. Determine whether the task can be completed in a single step using your intrinsic knowledge or one of your built-in tools
-- Consider this as special cases for one-step completion, which should be placed in the "steps_to_take" section.
-- If determined that it can be answered with intrinsic knowledge, DO NOT try to answer it yourself. Pass the task to the next agent by using the original input text verbatim as one single step to fill in the "steps_to_take" section.
-2. Gauge whether the task is most likely to be best completed with coding. If so, merge multiple logical sub-steps into one comprehensive step due to available dedicated coding tools.
-3. If neither intrinsic knowledge nor built-in tools suffice, strategize and outline up to 3 necessary steps to achieve the final goal.
-4. Check whether you've slipped your mind and broken down a "coding task" into baby steps; if so, merge these steps back into one.
-5. Fill out the "steps_to_take" section of your reply template.
-Remember that you are a dispatcher; you DO NOT work on tasks yourself.
-
-In your reply, list out your think-aloud steps clearly:
-
-Example:
-When tasked with "calculate prime numbers up to 100," you should reshape your answer as follows: 
-{
-    "my_thought_process": [
-        "Determine if this task can be done in single step: NO",
-        "Determine if this task can be done with coding: YES,
-        "Strategize on breaking task into logical subtasks: [
-        "Define a function to check if a number is prime or not.",
-        "Use a loop iterating through numbers from 2 up-to 100.",
-        "Call this function within loop." ]",
-        "Check for unnecessary breakdowns especially for 'coding' tasks: made a mistake, should be a coding task",
-        "Fill out 'steps_to_take' accordingly: merge steps into one [
-        "Define a function that checks if numbers are prime. Use this function within loop iterating through numbers from 2 up-to 100. Print each number if it's prime." ]"
-    ],
-    "steps_to_take": [ "Define a function that checks if numbers are prime. Use this function within loop iterating through numbers from 2 up-to 100. Print each number if it's prime." ]
-}
-
-Example:
-
-When tasked with "find out how old is Barack Obama", you should reshape your answer as follows: 
-{
-    "my_thought_process": [
-        "Determine if this task can be done in single step: YES",
-        "Can be answered with intrinsic knowledge: YES, use original input to fill "steps_to_take" section"
-    ],
-    "steps_to_take": [
-    "find out how old is Barack Obama"
-    ]
-}
-
-Example:
-
-When tasked with "find out when Steve Jobs died", you should reshape your answer as follows:
-{
-    "my_thought_process": [
-        "Determine if this task can be done in single step: YES",
-        "Can use built-in tool 'search_with_bing' directly to get the answer"
-    ],
-    "steps_to_take": [
-    "Use 'search_with_bing' tool to find the date of Steve Jobs death"
-    ]
-}
-
-Use this format for your response:
-```json
-{
-    "my_thought_process": [
-        "thought_process_one: my judgement at this step",
-        "...",
-        "though_process_N: : my judgement at this step"
-    ],
-    "steps_to_take": ["Step description", ...] 
-}
-```
-"#.to_string();
-
-    // For coding tasks specifically:
-    // - Always merge multiple steps into one single step since you have dedicated coding tools that can complete such tasks in one go. Do not break down coding tasks into separate sub-steps.
-
-    // Guidelines:
-    // - Attempt to solve non-coding related queries using intrinsic knowledge or built-in tools first before resorting to breaking down into further actionable steps.
-    // - For non-coding related multi-step problems, outline up to 3 necessary steps clearly and concisely.
-    // - Treat coding problems as special cases where multiple logical sub-steps should be merged into one comprehensive step due to available dedicated coding tools.
-
-    pub static ref CODE_PYTHON_SYSTEM_MESSAGE: String =
+    pub static ref CODE_PYTHON_PROMPT: String =
         r#"`You are a helpful AI assistant.
 Provide clean, executable Python code blocks to solve tasks, without adding explanatory sentences. Follow these guidelines:
 1. Use Python code blocks to perform tasks such as collecting information, executing operations, or outputting results. Ensure the code is ready to execute without requiring user modifications.
@@ -312,102 +63,6 @@ Provide clean, executable Python code blocks to solve tasks, without adding expl
 Use this approach to ensure that the user receives precise, direct, and executable Python code for their tasks."#.to_string();
 
     // Reply "TERMINATE" in the end when everything is done.
-
-    pub static ref FUNCTON_CALL_SYSTEM_PROMPT: String =
-        r#"<|im_start|>system You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: <tools>
-    
-    The function `get_webpage_text` retrieves all text content from a given URL. For example, calling `get_webpage_text("https://example.com")` will fetch the text from Example.com.
-    
-    The function `search_with_bing` performs a search using Bing and returns the results. For example, `search_with_bing("latest AI research trends")` will return search results related to the latest trends in AI research. 
-    {
-        "name": "get_webpage_text",
-        "description": ""Retrieves all text content from a specified website URL.",
-        "parameters": {
-            "url": {
-                "type": "string",
-                "description": "The URL of the website from which to fetch the text content__"
-            }
-        },
-        "required": ["url"],
-        "type": "object"
-    }
-    
-    {
-        "name": "search_with_bing",
-        "description": "Conduct a search using the Bing search engine and return the results.",
-        "parameters": {
-            "query": {
-                "type": "string",
-                "description": "The search query to be executed on Bing__"
-            }
-        },
-        "required": ["query"],
-        "type": "object"
-    }
-    For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
-    <tool_call>
-    {"arguments": <args-dict>, "name": <function-name>}
-    </tool_call>"#.to_string();
-
-    pub static ref ROUTING_BY_TOOLCALL_PROMPT: String =
-        r#"
-    <|im_start|>system You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. Your sole responsibility is to route tasks to appropriate agents based on their capabilities using virtual toolcalls. Do not attempt to execute or handle any part of the user's task yourself. Here are the available tools: <tools>
-
-    The virtual toolcall routing allows dispatching tasks based on agent capabilities:
-    
-    **coding_agent**: Specializes in generating clean, executable Python code for various tasks.
-    **user_proxy**: Represents the user by delegating tasks to agents, reviewing their outputs, and ensuring tasks meet user requirements; it is also responsible for receiving final task results.
-    
-    Use "coding_agent" or "user_proxy" as virtual toolcall names with arguments specifying key points from input.
-    
-    For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
-    <tool_call>
-    {"arguments": <args-dict>, 
-    "name":"<function-name>"}
-    </tool_call>
-    
-    The following are examples of how to use these virtual toolcalls:
-    
-    1. **coding_agent**:
-       - Description: Specializes in generating clean, executable Python code for various tasks.
-       - Use this agent when you need specific Python code generated.
-       - Example usage:
-           {
-               "name": "coding_agent",
-               "description": "Routes task to coding_agent for generating Python code.",
-               "parameters": {
-                   "key_points": {
-                       "type": "string",
-                       "description": "key points from input that describes what kind of problem a coding_agent needs to solve with Python code."
-                   }
-               },
-               "required": ["key_points"],
-               "type": "object"
-           }
-    
-    2. **user_proxy**:
-       - Description: Represents the user by delegating tasks to agents, reviewing their outputs, and ensuring tasks meet user requirements; it is also responsible for receiving final task results.
-       - Use this agent when you're not explicitly asked to use code to solve a problem.
-       - Use this agent when you need someone else (e.g., another agent) involved in completing or reviewing a task.
-       - Use this agent when you're given some facts without any explicit user intentions expressed; you're expected only pass on such information without additional processing or interpretation.
-       - Example usage:
-           {
-            "name": "user_proxy",
-            "description": "Routes task to user_proxy for delegation and review.",
-            "parameters": {
-                "key_points":{
-                    "type": "string",
-                    "description": "Review generated report & provide feedback."
-                }
-             }, 
-             "required": ["key_points"], 
-             "type": "object"
-          }  
-    
-    Examples of routing decisions:
-    
-    - If input involves providing an answer/result directly without needing new code generation (e.g., factual statements like weather updates), route it directly through "user_proxy".
-    - If input requires specific programming solutions (e.g., writing new functions or scripts), route it through "coding_agent"."#.to_string();
 
     pub static ref FURTER_TASK_BY_TOOLCALL_PROMPT: String =
         r#"<|im_start|>system You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: <tools>
@@ -549,108 +204,270 @@ For each function call return a json object with function name and arguments wit
     );
 }
 
-/* pub async fn entry(inp: &str) {
-    use tokio::select;
+pub static GROUNDING_CHECK_TEMPLATE: Lazy<String> = Lazy::new(|| {
+    let today = Utc::now().format("%Y-%m-%dT").to_string();
+    format!(
+        r#"
+<|im_start|>system You are an AI assistant. Your task is to determine whether a question requires grounding in real-world date, time, location, or physics.
 
-    let mut agent = ImmutableAgent::coding_agent(None, "");
-    loop {
-        agent = select! {
-            agent = group.next_agent() => {
-                agent
-            },
-            _ = signal::ctrl_c() => {
-                std::process::exit(0);
-            },
-        };
+When given a task, please follow these steps to think it through and then act:
 
-        agent.();
+Identify Temporal Relevance: Determine if the question requires current or time-sensitive information. Note that today's date is {}.
+Check for Location Specificity: Identify if the question is location-specific.
+Determine Real-time Data Dependency: Assess if the answer depends on real-time data or specific locations.
+Suggest Grounding Information: If grounding is needed, suggest using today's date to cross-validate the reply. Otherwise, suggest reliable sources to obtain the necessary grounding data.
+
+Remember that you are a dispatcher; you DO NOT work on tasks yourself. Your role is to direct the process.
+
+In your reply, list out your think-aloud steps clearly:
+
+Example 1:
+
+When tasked with "What is the weather like in New York?" reshape your answer as follows:
+
+{{
+    \"my_thought_process\": [
+        \"my_goal: goal is to identify whether grounding is needed for this task\",
+        \"Determine if the question requires current or time-sensitive information: YES\",
+        \"Provide assistance to agent for this task grounding information: today's date is xxxx-xx-xx\",
+        \"Echo original input verbatim in key_points section\"
+    ],
+    \"key_points\": [\"today's date is xxxx-xx-xx, What is the weather like in New York\"]
+}}
+
+Example 2:
+
+When tasked with \"Who killed John Lennon?\" reshape your answer as follows:
+
+{{
+    \"my_thought_process\": [
+        \"my_goal: goal is to identify whether grounding is needed for this task\",
+        \"Determine if the question requires current or time-sensitive information: NO\",
+        \"Echo original input verbatim in key_points section\"
+    ],
+    \"key_points\": [\"Who killed John Lennon?\"]
+}}
+
+Use this format for your response:
+
+```json
+{{
+    \"my_thought_process\": [
+        \"my_goal: goal is to identify whether grounding is needed for this task\",
+        \"thought_process_one: my judgement at this step\",
+        \"...\",
+        \"thought_process_N: my judgement at this step\"
+    ],
+    \"grounded_or_not\": \"YES\" or \"NO\",
+    \"key_points\": [\"point1\", \"point2\", ...]
+}}
+"#,
+        today
+    )
+});
+
+const NEXT_STEP_PLANNING_PROMPT: &'static str = r#"
+    You are a helpful AI assistant with extensive capabilities. Your goal is to help complete tasks and create plausible answers grounded in real-world history of events and physics with minimal steps.
+
+    You have three built-in tools to solve problems:
+    
+    - use_intrinsic_knowledge: You can answer many questions and provide a wealth of knowledge from within yourself. This should be your first approach to problem-solving.
+    - code_with_python: Generates and executes Python code for various tasks based on user input. It handles mathematical computations, data analysis, large datasets, complex operations through optimized algorithms, providing precise, deterministic outputs.
+    - search_with_bing: Performs an internet search using Bing and returns relevant results based on a query. Use it to get information you don't have or cross-check for real-world grounding.
+    
+    TASK HANDLING INSTRUCTIONS
+    
+    1. INITIAL SOLUTION:
+       - Provide a brief solution to the task based on your best effort.
+    
+    2. RETHINK AND REEVALUATE:
+       - Rethink why you gave such an answer; then think it through again by following these steps:
+    
+         a. Determine whether the task can be completed in a single step with your built-in tools.
+            - If YES, consider this as special cases for one-step completion which should be placed in the "steps_to_take" section.
+            - If determined that it can be answered with intrinsic knowledge, provide the answer directly without passing it off as another step.
+    
+         b. If neither intrinsic knowledge nor built-in tools suffice:
+            - Strategize and outline necessary steps to achieve the final goal.
+            - Each step corresponds to a task that can be completed with one of three approaches: intrinsic knowledge, creating Python code, or searching with Bing.
+    
+    3. GROUNDING CHECKS:
+       - You don't need to do grounding checks for well-documented, established facts when there is no direct or inferred reference point of date or locality in the task.
+    
+    4. LISTING STEPS:
+       - Think about why you outlined such a step.
+       - When cascading down to coding tasks:
+         * Constrain them ideally into one coding task.
+       
+    5. FILL OUT THE "STEPS_TO_TAKE" SECTION ACCORDINGLY:
+    
+    In your reply, list out your think-aloud steps clearly:
+    
+    Example 1:
+    
+    When tasked with "calculate prime numbers up to 100," reshape your answer as follows:
+    
+    {
+        "my_goal": "goal is to help complete this mathematical computation efficiently",
+        "my_gut_answer": "write some code to do this; likely an array of numbers between 1 and 100",        "my_thought_process": [
+            "Determine if this task can be done in single step: NO",
+            "Determine if this task can be done with coding: YES",
+            "Strategize on breaking down into logical subtasks: ",
+            "[Define function checking if number is prime]",
+            "[Loop through numbers 2-100 calling function]",
+            "[Print each number if it's prime]",
+            "...",
+            "[Check for unnecessary breakdowns especially for 'coding' tasks]: merge into single coding action"
+        ],
+        "steps_to_take": ["Define function checking primes; loop through 2-100 calling function; print primes"]
     }
-} */
+    
+    Example 2:
+    
+    When tasked with "find out how old Barack Obama is" reshape your answer as follows:
+    
+    {
+        "my_goal": "goal is finding Barack Obama's current age quickly",
+        “my_gut_answer”: “Barack Obama is world famous; I probably have his birth date in my knowledge base”,        "my_thought_process": [
+            "Determine if this task can be done in single step: YES",
+            "Can be answered via intrinsic knowledge directly: YES",
+            "check real world grounding: my knowledge base is based on data grounded in 2022; need current year",
+            "use search_with_bing tool finding current year",
+            "collate age based on birth year (1961) and current year"
+        ],
+        "steps_to_take": ["Use 'search_with_bing' tool finding current year", 
+                          "Calculate Barack Obama's age from birth year (1961)"]
+    }
 
-const _DRAFT_TOOLCALL_PROMPT: &'static str =
-    r#"
-I'm creating a large language model prompt that use these strategies:
-1. Goal directed planning
-2. Chain of thoughts/think step by step
-3. Use template to record and guide thought process
-4. Direct model to fill in the desired final reply in template
+    Example 3:
+    
+    When tasked with "find out when Steve Jobs died," reshape your answer as follows:
+    
+    {
+        "my_goal": "goal is finding Steve Jobs' date of death accurately",
+        ”my_gut_answer”: ”Steve Jobs was world famous; I probably have his death date in my database.”,        "my_thought_process": [
+           "Determine if this task could utilize built-in tools: YES, can use intrinsic knowledge"
+         ],
+         "steps_to_take": ["find out when Steve Jobs died"]
+    }
 
-Need you to do polishing over these modular sections according to the raw material 
-// below is the task description, some steps layed out already, but there may be steps missing, and the break down of the steps may not be ideal and the wording/logic may need touching up
+    Example 4:
 
-You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: 
-
-// here is guideline on how to think through the task step by step, 
-The function "code_with_python" generates clean, executable Python code for various tasks based on the user input. For example, calling "code_with_python("key_points": "Create a Python script that reads a CSV file and plots a graph")" will generate Python code that performs this task.
-
-The function "get_webpage_text" retrieves all text content from a given URL, which can be useful for extracting information from web pages or articles. For example, calling "get_webpage_text("https://example.com")" will fetch the text from Example.com.
-
-The function "search_with_bing" performs an internet search using Bing and returns relevant results based on the query provided by the user. This can be useful for finding up-to-date information on various topics. For example, "search_with_bing("latest AI research trends")" will return search results related to the latest trends in AI research.
-
-//here are the templates to for the function objects:
-
-{
-    "name": "get_webpage_text",
-    "description": "Retrieves all text content from a specified website URL.",
-    "parameters": {
-        "url": {
-            "type": "string",
-            "description": "The URL of the website from which to fetch the text content"
-        }
-    },
-    "required": ["url"],
-    "type": "object"
-}
+When tasked with "how to describe Confucius" reshape your answer as follows:
 
 {
-    "name": "code_with_python",
-        "description": "Generates clean, executable Python code for various tasks",
-        "parameters": {
-            "key_points": {
-                "type": "string",
-                "description": "Key points from input that describes what kind of problem needs to be solved with Python code."
-            }
-        },
-        "required": ["key_points"],
-        "type": "object"
+    "my_goal": "goal is to provide an accurate description of Confucius",
+    “my_gut_answer”: “Confucius is famous; I probably have his biography”,
+    "my_thought_process": [
+       "Determine if this task can be done in a single step: YES",
+       "Can it utilize intrinsic knowledge directly? YES"
+       "Confucius was a historical figure whose details are well-documented: no need to check grounding"
+       ]
+      ],
+      "steps_to_take": ["how to describe Confucius"]
 }
 
+Use this format for your response:
+```json
 {
-"name": "search_with_bing",
-"description": "Conducts an internet search using Bing search engine and returns relevant results.",
-"parameters": { 
-     "query": { 
-         "type": "string", 
-         "description": "The search query to be executed on Bing" 
-      } 
- }, 
- "required": ["query"], 
- "type": "object"
+    "my_thought_process": [
+        "thought_process_one: my judgement at this step",
+        "...",
+        "though_process_N: : my judgement at this step"
+    ],
+    "steps_to_take": ["Step description", "..."] 
 }
+```
+"#;
 
-//Here are examples of toolcalls for different scenarios, you may need to synchronize the example with above cases
-Examples of toolcalls for different scenarios and tools:
-1. To retrieve webpage text:
+const NEXT_STEP_BY_TOOLCALL_PROMPT: &'static str = r#"
+<|im_start|>system You are a function-calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Do not make assumptions about what values to plug into functions.
+
+Here are the available tools:
+
+<tools>
+1. **use_intrinsic_knowledge**: 
+Description: Solves tasks using capabilities and knowledge obtained at trainning time, the carveate is that it is frozen by the cut-off date and it's not aware of real world date of its operation.
+Example Call:
 <tool_call>
-{"arguments":{"url":"https://example.com"}, 
-"name":"get_webpage_text"}
+{"arguments": {"task": "tell a joke"}, 
+"name": "use_intrinsic_knowledge"}
 </tool_call>
 
-2. To generate Python code:
+2. **search_with_bing**: 
+Description: Conducts an internet search using Bing search engine and returns relevant results based on the query provided by the user. It's a safe choice to try searching for results; if they are not satisfactory, you can use suspect URLs from these search results with "get_webpage_text" function.
+
+Special Note 1: This function performs an internet search to find relevant webpages based on your query. It helps narrow down potential sources of information before extracting specific content.
+
+Special Note 2: Using search_with_bing as an initial step can make subsequent tasks more targeted by providing exact links that can then be scraped using get_webpage_text. This approach ensures higher relevance and accuracy of retrieved data.
+Example Call:
 <tool_call>
-{"arguments":{"key_points":"Create a Python script that reads data from an API and stores it in a database"}, 
-"name":"code_with_python"}
+{"arguments": {"query": "latest AI research trends"}, 
+"name": "search_with_bing"}
 </tool_call>
 
-3. To perform an internet search:
+3. **code_with_python**: 
+Description: Generates clean, executable Python code for various tasks based on user input.
+Example Call:
 <tool_call>
-{"arguments":{"query":"best practices in software development"}, 
-"name":"search_with_bing"}
+{"arguments": {"key_points": "Create a Python script that reads a CSV file and plots a graph"}, 
+"name": "code_with_python"}
 </tool_call>
 
-//here is the template for agent to record the final result that the user is hoping for, you don't need to touch it
-For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
+4. **get_webpage_text**: 
+Description: Fetches all textual content from the specified webpage URL and returns it as plain text. It does not parse or structure the data in any specific format, so it may include extraneous information such as navigation menus, advertisements, and other non-essential text elements present on the page.
+
+Special Note 1: This function retrieves raw text from a given URL without filtering out irrelevant content. Therefore, using a URL that is not unique to your solution may result in obtaining unrelated data.
+
+Special Note 2: While this function can extract text from a known relevant webpage directly, it is often more effective to first use search_with_bing to find precise URLs before scraping them for targeted information.
+
+Example Call:
 <tool_call>
-{"arguments": <args-dict>, 
-"name":"<function-name>"}
-</tool_call>"#;
+{"arguments": {"url": "https://example.com"}, 
+"name": "get_webpage_text"}
+</tool_call>
+</tools>
+
+Function Definitions:
+
+use_intrinsic_knowledge
+Description: Solves tasks using built-in capabilities.
+Parameters:
+problem: The task you receive (type:string)
+Required Parameters:["task"]
+
+search_with_bing
+Description: Conducts an internet search using Bing search engine and returns relevant results based on the query provided by the user.
+Parameters:
+query: The search query to be executed on Bing (type:string)
+Required Parameters:["query"]
+
+code_with_python
+Description Generates clean executable Python code for various tasks.Parameters key_points Key points describing what kind of problem needs to be solved with Python code(type:string) Required Parameters:["key_points"]
+
+get_webpage_text
+Description Retrieves all textual content froma specified website URL.It does not parse or structure data in any specific format; hence,it may include extraneous information such as navigation menus advertisements,and other non-essential text elements present onthe page.Parameters url The URLofthe website from which to fetch textual content(type:string) Required Parameters:["url"]
+
+Remember that you area dispatcher;you DO NOT workon tasks yourself.
+
+Examples of tool calls for different scenarios:
+
+To handlea task like "tell a joke" with intrinsic knowledge: <tool_call>{"
+arguments": {"task": "tell ajoke"},
+"name": "use_intrinsic_knowledge"}</tool_call>
+To retrieve webpage text: <tool_call>{"
+arguments": {"url": "https://example.com"},
+"name": "get_webpage_text"}</tool_call>
+To generate Python code: <tool_call>{"arguments": {"key_points": "CreateaPython script that reads data from an API and stores it in adatabase"},
+"name": "code_with_python"}</tool_call>
+To perform an internet search: <tool_call>{"
+arguments": {"query": "best practices in software development"},
+"name": "search_with_bing"}</tool_call>
+
+For each function call, return a JSON object with function name and arguments within <tool_call></tools> XML tags as follows:
+
+<tools>  
+{"arguments": <args-dict>,   
+"name": "<function_name>"}
+</tools>
+"#;

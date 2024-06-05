@@ -1,6 +1,5 @@
 use anyhow;
 use regex::Regex;
-// use rustpython::vm::Settings;
 use rustpython::vm;
 use rustpython::InterpreterConfig;
 
@@ -54,48 +53,6 @@ pub fn run_python_capture(code: &str) -> anyhow::Result<String, String> {
     })
 }
 
-// pub fn run_python_vm(code: &str) {
-//     let settings = Settings::default();
-//     let settings = Settings::with_path(settings, "/Users/jichen/.cargo/bin/rustpython".to_owned());
-//     // let settings = Settings::with_path(
-//     //     settings,
-//     //     "/Users/jichen/Downloads/RustPython-0.3.1/pylib/Lib/".to_owned(),
-//     // );
-
-//     vm::Interpreter
-//         ::with_init(settings, |vm| {
-//             vm.add_native_modules(rustpython_stdlib::get_module_inits());
-//             vm.add_frozen(
-//                 rustpython_vm::py_freeze!(
-//                     dir = "/Users/jichen/Downloads/RustPython-0.3.1/pylib/Lib/"
-//                 )
-//             );
-//         })
-//         .enter(|vm| {
-//             let _ = vm.run_code_string(vm.new_scope_with_builtins(), code, "<...>".to_owned());
-//         });
-// }
-
-pub fn run_python_func(func_path: &str) -> anyhow::Result<String, String> {
-    match std::process::Command::new("/Users/jichen/.cargo/bin/rustpython")
-        .arg(func_path)
-        .output()
-    {
-        Ok(out) => {
-            if !out.stdout.is_empty() {
-                Ok(format!(
-                    "Output: {}",
-                    String::from_utf8(out.stdout).unwrap()
-                ))
-            } else {
-                Err("empty result".to_string())
-            }
-        }
-
-        Err(e) => Err(format!("Failed to execute command: {}", e)),
-    }
-}
-
 pub fn extract_code(text: &str) -> String {
     let multi_line_pattern = r"(?s)```python(.*?)```";
     let mut program = String::new();
@@ -109,37 +66,3 @@ pub fn extract_code(text: &str) -> String {
 
     program
 }
-
-pub fn extract_code_blocks(
-    text: &str,
-    detect_single_line_code: bool,
-) -> Vec<(Option<String>, String)> {
-    // Adjust regex pattern to handle both Unix and Windows line endings and optional language specifier
-    let multi_line_pattern = r"```[ \t]*(\w+)?[ \t]*\r?\n(.*?)\r?\n[ \t]*```";
-    let single_line_pattern = r"`([^`]+)`";
-    let mut results: Vec<(Option<String>, String)> = Vec::new();
-
-    let multi_line_regex = Regex::new(multi_line_pattern).unwrap();
-    for cap in multi_line_regex.captures_iter(text) {
-        let language = cap
-            .get(1)
-            .map_or(None, |m| Some(m.as_str().trim().to_string()));
-        let code = cap.get(2).unwrap().as_str().trim().to_string();
-        results.push((language.clone(), code.clone()));
-        // println!("Matched multi-line code block: Language: {:?}, Code: {}", language, code);
-    }
-
-    if detect_single_line_code {
-        let single_line_regex = Regex::new(single_line_pattern).unwrap();
-        for cap in single_line_regex.captures_iter(text) {
-            results.push((None, cap.get(1).unwrap().as_str().trim().to_string()));
-            // println!("Matched single-line code: {}", cap.get(1).unwrap().as_str().trim());
-        }
-    }
-
-    results
-}
-
-// export DYLD_LIBRARY_PATH=/Users/jichen/miniconda3/lib:$DYLD_LIBRARY_PATH
-// export PYO3_PYTHON=/Users/jichen/miniconda3/bin/python
-// export DYLD_LIBRARY_PATH=/Users/jichen/miniconda3/lib

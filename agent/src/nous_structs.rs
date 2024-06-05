@@ -1,15 +1,12 @@
 use endpoints::{
     chat::{
-        ChatCompletionObject,
-        ChatCompletionRequest,
-        ChatCompletionRequestMessage,
-        ChatCompletionRole,
-        ChatCompletionUserMessageContent,
+        ChatCompletionObject, ChatCompletionRequest, ChatCompletionRequestMessage,
+        ChatCompletionRole, ChatCompletionUserMessageContent,
     },
     common::Usage,
 };
 use llama_core::LlamaCoreError;
-use serde::{ Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 // use crate::llm_llama_local::chat_inner_async;
 
@@ -77,18 +74,18 @@ impl NousResponseMessage {
     pub fn content_to_string(&self) -> String {
         match &self.content {
             NousContent::Text(text) => text.clone(),
-            NousContent::NousToolCall(tool_call) =>
-                format!(
-                    "tool_call: {}, arguments: {}",
-                    tool_call.name,
-                    tool_call.arguments
-                        .as_ref()
-                        .unwrap()
-                        .into_iter()
-                        .map(|(arg, val)| format!("{:?}: {:?}", arg, val))
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                ),
+            NousContent::NousToolCall(tool_call) => format!(
+                "tool_call: {}, arguments: {}",
+                tool_call.name,
+                tool_call
+                    .arguments
+                    .as_ref()
+                    .unwrap()
+                    .into_iter()
+                    .map(|(arg, val)| format!("{:?}: {:?}", arg, val))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ),
         }
     }
 }
@@ -129,11 +126,11 @@ pub fn output_nous_response(res_obj: ChatCompletionObject) -> NousResponseMessag
 
 pub async fn chat_completions_partial(
     chat_request: &mut ChatCompletionRequest,
-    user_input: &str
+    user_input: &str,
 ) -> Result<NousResponseMessage, LlamaCoreError> {
     let user_message = ChatCompletionRequestMessage::new_user_message(
         ChatCompletionUserMessageContent::Text(user_input.to_string()),
-        None
+        None,
     );
 
     chat_request.messages.push(user_message);
@@ -148,14 +145,14 @@ pub async fn chat_completions_partial(
 pub async fn chat_completions_full(
     chat_request: &mut ChatCompletionRequest,
     system_prompt: &str,
-    user_input: &str
+    user_input: &str,
 ) -> Result<NousResponseMessage, LlamaCoreError> {
     let system_message = ChatCompletionRequestMessage::new_system_message(system_prompt, None);
 
     chat_request.messages.push(system_message);
     let user_message = ChatCompletionRequestMessage::new_user_message(
         ChatCompletionUserMessageContent::Text(user_input.to_string()),
-        None
+        None,
     );
 
     chat_request.messages.push(user_message);
