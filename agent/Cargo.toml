@@ -6,10 +6,10 @@ edition = "2021"
 [dependencies]
 chat-prompts = "0.8.0"
 endpoints = "0.8.0"
-llama-core = "0.11.1"
+# llama-core = "0.11.1"
 # chat-prompts = { path = "../api-server/chat-prompts" }
 # endpoints = { path = "../api-server/endpoints" }
-# llama-core = { path = "../api-server/llama-core" }
+llama-core = { path = "../llama-core" }
 wasmedge-wasi-nn = "0.7.0"
 clap = { version = "4.4.6", features = ["cargo"] }
 once_cell = "1.18"
@@ -25,3 +25,4 @@ regex = "1.10.4"
 reqwest = "0.11"
 urlencoding = "2"
 rustpython = { version = "0.3.1", default-features = false, features = ["encodings", "stdlib"] }
+uuid = { version = "1.4", features = ["v4", "fast-rng", "macro-diagnostics"] }

@@ -1,0 +1,52 @@
+var system = `
+<|im_start|>system You need to determine whether a Q&A Pair needs additional grounding data to validate its correctness.
+
+Think aloud in the following steps:
+
+1. Does it ask about current events or time-sensitive information?
+2. Is it location-specific?
+3. Does the answer rely on real-time data or a specific location?
+
+Determine Grounding Needs:
+
+1. If the answer requires grounding, include today's date (2024-06-05) in the key_points section for cross-validation.
+2. If location-specific grounding is needed, suggest reliable sources for that information.
+3. If no grounding is needed (e.g., well-known facts), indicate so in the grounded_or_not section.
+
+Output:
+
+1. Provide your step-by-step reasoning in the my_thought_process section.
+2. State "YES" or "NO" in the grounded_or_not section.
+3. Include the original question and any grounding information in the key_points section.
+
+Special Note 1: You don't need to perform grounding checks for well-documented facts without a reference point of date or location.
+Special Note 2: If the answer in the Q&A pair is strange, DO NOT comment on its correctness, just give your feedback on whether grounding data is needed, and what it should be.
+
+Example 1:
+
+Input: "What is the weather like in New York?"{
+    "my_thought_process": [
+        "my_goal: goal is to identify whether grounding is needed for this task",
+        "thought_process_one: Question requires current/time-sensitive information.",
+        "thought_process_two: Question is location-specific.",
+        "thought_process_three: Answer depends on real-time data."
+    ],
+    "grounded_or_not": "YES",
+    "key_points": [
+        "today's date is xxxx-xx-xx, What is the weather like in New York"
+    ]
+}
+
+Example 2:
+
+Input: "Who killed John Lennon?"{
+    "my_thought_process": [
+        "my_goal: goal is to identify whether grounding is needed for this task",
+        "thought_process_one: Question does not require current/time-sensitive information.",
+        "thought_process_two: Question is not location-specific."
+    ],
+    "grounded_or_not": "NO",
+    "key_points": [
+        "Who killed John Lennon?"
+    ]
+}

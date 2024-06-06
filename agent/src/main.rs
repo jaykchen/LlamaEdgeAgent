@@ -1,11 +1,14 @@
 use chat_prompts::PromptTemplateType;
 use clap::Parser;
 use endpoints::chat::{
-    ChatCompletionRequestBuilder, ChatCompletionRequestMessage, ChatCompletionRequestSampling,
+    ChatCompletionRequestBuilder,
+    ChatCompletionRequestMessage,
+    ChatCompletionRequestSampling,
 };
 use llama_agent::immutable_agent::*;
-use llama_core::{init_core_context, MetadataBuilder};
-use serde::{Deserialize, Serialize};
+use llama_agent::TINY_LLAMA_TOOL_CALL;
+use llama_core::{ init_core_context, MetadataBuilder };
+use serde::{ Deserialize, Serialize };
 
 #[derive(Debug, Parser)]
 #[command(author, about, version, long_about = None)]
@@ -80,10 +83,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // log version
-    log(format!(
-        "\n[INFO] llama-chat version: {}",
-        env!("CARGO_PKG_VERSION")
-    ));
+    log(format!("\n[INFO] llama-chat version: {}", env!("CARGO_PKG_VERSION")));
 
     // log the cli options
     log(format!("[INFO] Model name: {}", &cli.model_name));
@@ -122,11 +122,13 @@ async fn main() -> anyhow::Result<()> {
 
     // get the plugin version info
     let plugin_info = llama_core::get_plugin_info()?;
-    log(format!(
-        "[INFO] Wasi-nn-ggml plugin: b{build_number} (commit {commit_id})",
-        build_number = plugin_info.build_number,
-        commit_id = plugin_info.commit_id
-    ));
+    log(
+        format!(
+            "[INFO] Wasi-nn-ggml plugin: b{build_number} (commit {commit_id})",
+            build_number = plugin_info.build_number,
+            commit_id = plugin_info.commit_id
+        )
+    );
 
     // create a ChatCompletionRequestSampling instance
     let sampling = if cli.temp.is_none() && cli.top_p.is_none() {
@@ -187,11 +189,19 @@ async fn main() -> anyhow::Result<()> {
 
         println!("\n[Bot]:");
 
-        let task_vec = user_proxy
-            .next_step_planning(&mut chat_request, &user_input)
-            .await;
+        // let task_vec = user_proxy
+        //     .next_step_planning(&mut chat_request, &user_input)
+        //     .await;
 
-        let o = user_proxy.stepper(&mut chat_request, &task_vec).await;
+        // let o = user_proxy.stepper(&mut chat_request, &task_vec).await;
+
+        let input =
+            serde_json::json!(
+    [{"role": "system", "content": TINY_LLAMA_TOOL_CALL.to_string() },
+     { "role": "user", "content": user_input }
+    ]).to_string();
+
+        let o = user_proxy.step_llama_by_toolcall(&mut chat_request, &input).await;
 
         println!("{:?}", o);
     }
@@ -203,9 +213,7 @@ fn read_input() -> String {
     let mut answer = String::new();
     loop {
         let mut temp = String::new();
-        std::io::stdin()
-            .read_line(&mut temp)
-            .expect("The read bytes are not valid UTF-8");
+        std::io::stdin().read_line(&mut temp).expect("The read bytes are not valid UTF-8");
 
         if temp.ends_with("\\\n") {
             temp.pop();
@@ -225,7 +233,7 @@ fn read_input() -> String {
 fn print_log_begin_separator(
     title: impl AsRef<str>,
     ch: Option<&str>,
-    len: Option<usize>,
+    len: Option<usize>
 ) -> usize {
     let title = format!(" [LOG: {}] ", title.as_ref());
 

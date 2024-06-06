@@ -2,17 +2,24 @@ use crate::exec_python::*;
 use crate::nous_structs::*;
 use crate::utils::*;
 use crate::webscraper_hook::*;
+use crate::TINY_LLAMA_TOOL_CALL;
 use crate::{
-    CODE_PYTHON_PROMPT, FURTER_TASK_BY_TOOLCALL_PROMPT, GROUNDING_CHECK_TEMPLATE,
-    IS_TERMINATION_PROMPT, ITERATE_CODING_FAIL_TEMPLATE, ITERATE_CODING_INCORRECT_TEMPLATE,
-    ITERATE_CODING_START_TEMPLATE, NEXT_STEP_BY_TOOLCALL_PROMPT, NEXT_STEP_PLANNING_PROMPT,
+    CODE_PYTHON_PROMPT,
+    FURTER_TASK_BY_TOOLCALL_PROMPT,
+    GROUNDING_CHECK_TEMPLATE,
+    IS_TERMINATION_PROMPT,
+    ITERATE_CODING_FAIL_TEMPLATE,
+    ITERATE_CODING_INCORRECT_TEMPLATE,
+    ITERATE_CODING_START_TEMPLATE,
+    NEXT_STEP_BY_TOOLCALL_PROMPT,
+    NEXT_STEP_PLANNING_PROMPT,
 };
 use anyhow;
 use endpoints::{
     chat::{
         ChatCompletionRequest,
-        // ChatCompletionObject,
-        // ChatCompletionRequestMessage,
+        ChatCompletionObject,
+        ChatCompletionRequestMessage,
         // ChatCompletionRole,
         // ChatCompletionSystemMessage,
         // ChatCompletionUserMessage,
@@ -20,6 +27,8 @@ use endpoints::{
     },
     // common::Usage,
 };
+use llama_core::chat::chat_completions_inject;
+use rustpython::vm::function;
 
 pub struct ImmutableAgent {
     pub name: String,
@@ -35,16 +44,14 @@ impl ImmutableAgent {
     }
 
     pub async fn get_user_feedback(&self) -> String {
-        use std::io::{self, Write};
+        use std::io::{ self, Write };
         print!("User input: ");
 
         io::stdout().flush().expect("Failed to flush stdout");
 
         let mut input = String::new();
 
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read line");
+        io::stdin().read_line(&mut input).expect("Failed to read line");
 
         if let Some('\n') = input.chars().next_back() {
             input.pop();
@@ -59,15 +66,72 @@ impl ImmutableAgent {
         return input;
     }
 
+    pub async fn step_llama_by_toolcall(
+        &self,
+        chat_request: &mut ChatCompletionRequest,
+        input: &str
+    ) -> Option<String> {
+        let system_message = ChatCompletionRequestMessage::new_system_message(
+            TINY_LLAMA_TOOL_CALL.to_string(),
+            None
+        );
+
+        chat_request.messages.push(system_message);
+
+        let output: ChatCompletionObject = chat_completions_inject(
+            chat_request,
+            input
+        ).await.expect("Failed to generate reply");
+
+        let content = output.choices[0].message.content.clone();
+        if let Some(ref obj) = output.choices[0].message.function_call {
+            let args = obj.arguments.to_string();
+            let name = obj.name.to_string();
+
+            Some(format!("name: {}, args: {}", name, args))
+        } else {
+            Some(content)
+        }
+    }
+
+    /*             NousContent::NousToolCall(call) => {
+    let args = call.clone().arguments.unwrap_or_default();
+
+    let res = match call.name.as_str() {
+        "send_email" => {
+            let recipient = args
+                .get("recipient")
+                .ok_or_else(|| anyhow::anyhow!("Missing 'url' argument"))
+                .ok()?
+                .to_string();
+            let message = args
+                .get("message")
+                .ok_or_else(|| anyhow::anyhow!("Missing 'url' argument"))
+                .ok()?
+                .to_string();
+
+            println!("receiver: {}, message: {}", recipient, message);
+            get_webpage_text("http://example.com".to_string())
+                .await
+                .ok()?
+        }
+        _ => {
+            return None;
+        }
+    };
+    Some(res)
+} */
+
     pub async fn furter_task_by_toolcall(
         &self,
         chat_request: &mut ChatCompletionRequest,
-        input: &str,
+        input: &str
     ) -> Option<String> {
-        let output: NousResponseMessage =
-            chat_completions_full(chat_request, &FURTER_TASK_BY_TOOLCALL_PROMPT, input)
-                .await
-                .expect("Failed to generate reply");
+        let output: NousResponseMessage = chat_completions_full(
+            chat_request,
+            &FURTER_TASK_BY_TOOLCALL_PROMPT,
+            input
+        ).await.expect("Failed to generate reply");
 
         match &output.content {
             NousContent::Text(t) => {
@@ -116,12 +180,13 @@ impl ImmutableAgent {
     pub async fn next_step_by_toolcall(
         &self,
         chat_request: &mut ChatCompletionRequest,
-        input: &str,
+        input: &str
     ) -> Option<String> {
-        let output: NousResponseMessage =
-            chat_completions_full(chat_request, &NEXT_STEP_BY_TOOLCALL_PROMPT, &input)
-                .await
-                .expect("Failed to generate reply");
+        let output: NousResponseMessage = chat_completions_full(
+            chat_request,
+            &NEXT_STEP_BY_TOOLCALL_PROMPT,
+            &input
+        ).await.expect("Failed to generate reply");
 
         match &output.content {
             NousContent::Text(_) => {
@@ -182,12 +247,13 @@ impl ImmutableAgent {
     pub async fn next_step_planning(
         &self,
         chat_request: &mut ChatCompletionRequest,
-        input: &str,
+        input: &str
     ) -> Vec<String> {
-        let output: NousResponseMessage =
-            chat_completions_full(chat_request, &NEXT_STEP_PLANNING_PROMPT, input)
-                .await
-                .expect("Failed to generate reply");
+        let output: NousResponseMessage = chat_completions_full(
+            chat_request,
+            &NEXT_STEP_PLANNING_PROMPT,
+            input
+        ).await.expect("Failed to generate reply");
 
         match &output.content {
             NousContent::Text(_out) => {
@@ -203,7 +269,7 @@ impl ImmutableAgent {
     pub async fn stepper(
         &self,
         chat_request: &mut ChatCompletionRequest,
-        task_vec: &Vec<String>,
+        task_vec: &Vec<String>
     ) -> anyhow::Result<String> {
         let mut task_vec = task_vec.clone();
         let mut initial_input = match task_vec.pop() {
@@ -214,15 +280,14 @@ impl ImmutableAgent {
         };
         let mut res = String::new();
         loop {
-            res = self
-                .furter_task_by_toolcall(chat_request, &initial_input)
-                .await
-                .unwrap();
+            res = self.furter_task_by_toolcall(chat_request, &initial_input).await.unwrap();
             initial_input = match task_vec.pop() {
-                Some(s) => format!(
-                    "Here is the result from previous step: {}, here is the next task: {}",
-                    res, s
-                ),
+                Some(s) =>
+                    format!(
+                        "Here is the result from previous step: {}, here is the next task: {}",
+                        res,
+                        s
+                    ),
                 None => {
                     break;
                 }
@@ -235,7 +300,7 @@ impl ImmutableAgent {
         &self,
         chat_request: &mut ChatCompletionRequest,
         current_text_result: &str,
-        instruction: &str,
+        instruction: &str
     ) -> (bool, String) {
         let user_prompt = format!(
             "Given the task: {:?}, examine current result: {}, please decide whether the task is done or not",
@@ -245,17 +310,18 @@ impl ImmutableAgent {
 
         println!("{:?}", user_prompt.clone());
 
-        let raw_reply = chat_completions_full(chat_request, &IS_TERMINATION_PROMPT, &user_prompt)
-            .await
-            .expect("llm generation failure");
+        let raw_reply = chat_completions_full(
+            chat_request,
+            &IS_TERMINATION_PROMPT,
+            &user_prompt
+        ).await.expect("llm generation failure");
 
-        println!(
-            "_is_termination raw_reply: {:?}",
-            raw_reply.content_to_string()
+        println!("_is_termination raw_reply: {:?}", raw_reply.content_to_string());
+
+        let (terminate_or_not, _, key_points) = parse_next_move_and_(
+            &raw_reply.content_to_string(),
+            None
         );
-
-        let (terminate_or_not, _, key_points) =
-            parse_next_move_and_(&raw_reply.content_to_string(), None);
 
         (terminate_or_not, key_points.join(","))
     }
@@ -263,16 +329,19 @@ impl ImmutableAgent {
     pub async fn code_with_python(
         &self,
         chat_request: &mut ChatCompletionRequest,
-        message_text: &str,
+        message_text: &str
     ) -> anyhow::Result<()> {
         let formatter = ITERATE_CODING_START_TEMPLATE.lock().unwrap();
         let user_prompt = formatter(&[message_text]);
 
         for n in 1..9 {
             println!("Iteration: {}", n);
-            match chat_completions_full(chat_request, &CODE_PYTHON_PROMPT, &user_prompt)
-                .await?
-                .content
+            match
+                chat_completions_full(
+                    chat_request,
+                    &CODE_PYTHON_PROMPT,
+                    &user_prompt
+                ).await?.content
             {
                 NousContent::Text(_out) => {
                     // let head: String = _out.chars().take(200).collect::<String>();
@@ -282,9 +351,11 @@ impl ImmutableAgent {
                     println!("Run result {n}: {}\n", exec_result.clone());
 
                     if this_round_good {
-                        let (terminate_or_not, key_points) = self
-                            ._is_termination(chat_request, &exec_result, &user_prompt)
-                            .await;
+                        let (terminate_or_not, key_points) = self._is_termination(
+                            chat_request,
+                            &exec_result,
+                            &user_prompt
+                        ).await;
                         println!("Termination Check: {}\n", terminate_or_not);
                         // if terminate_or_not {
                         //     println!("key_points: {:?}\n", key_points);

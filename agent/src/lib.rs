@@ -3,6 +3,7 @@ pub mod immutable_agent;
 pub mod nous_structs;
 pub mod utils;
 pub mod webscraper_hook;
+
 use std::sync::{Arc, Mutex};
 
 type FormatterFn = Box<dyn (Fn(&[&str]) -> String) + Send + Sync>;
@@ -20,6 +21,34 @@ lazy_static! {
         "key_points": ["key points", ...]
     }
     ```
+    "#.to_string();
+
+    pub static ref TINY_LLAMA_TOOL_CALL: String =
+        r#"
+<|start_header_id|>system<|end_header_id|>
+
+You are a helpful assistant with access to the following functions. Use them if required -
+{
+    "name": "send_email",
+    "description": "Send an email for the given recipient and message",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "recipient": {
+                "type": "string",
+                "description": "The email address of the recipient"
+            },
+            "message": {
+                "type": "string",
+                "description": "The message to send"
+            }
+        },
+        "required": [
+            "recipient",
+            "message"
+        ]
+    }
+}
     "#.to_string();
 
     pub static ref SUMMARIZE_CHAT_HISTORY_PROMPT: String =
@@ -208,43 +237,50 @@ pub static GROUNDING_CHECK_TEMPLATE: Lazy<String> = Lazy::new(|| {
     let today = Utc::now().format("%Y-%m-%dT").to_string();
     format!(
         r#"
-<|im_start|>system You are an AI assistant. Your task is to determine whether a question requires grounding in real-world date, time, location, or physics.
+<|im_start|>system You shall determine whether a Q&A Pair needs additional grounding data to validate its correctness.
 
-When given a task, please follow these steps to think it through and then act:
+Think aloud in the following steps:
 
-Identify Temporal Relevance: Determine if the question requires current or time-sensitive information. Note that today's date is {}.
-Check for Location Specificity: Identify if the question is location-specific.
-Determine Real-time Data Dependency: Assess if the answer depends on real-time data or specific locations.
-Suggest Grounding Information: If grounding is needed, suggest using today's date to cross-validate the reply. Otherwise, suggest reliable sources to obtain the necessary grounding data.
+1. Does it ask about current events or time-sensitive information?
+2. Is it location-specific?
+3. Does the answer rely on real-time data or a specific location?
 
-Remember that you are a dispatcher; you DO NOT work on tasks yourself. Your role is to direct the process.
+Determine Grounding Needs:
 
-In your reply, list out your think-aloud steps clearly:
+1. If the answer requires grounding, include today's date {} in the key_points section for cross-validation.
+2. If location-specific grounding is needed, suggest reliable sources for that information.
+3. If no grounding is needed (e.g., well-known facts), indicate so in the grounded_or_not section.
 
-Example 1:
+Output:
 
-When tasked with "What is the weather like in New York?" reshape your answer as follows:
+1. Provide your step-by-step reasoning in the my_thought_process section.
+2. State "YES" or "NO" in the grounded_or_not section.
+3. Include the original question and any grounding information in the key_points section.
+
+Special Note 1: Well-documented facts are to be tagged "NO" in the grounded_or_not section automatically.
+Special Note 2: If the answer in the Q&A pair is strange, DO NOT comment on its correctness, just give your feedback on whether grounding data is needed, and what it should be.
 
 {{
     \"my_thought_process\": [
         \"my_goal: goal is to identify whether grounding is needed for this task\",
-        \"Determine if the question requires current or time-sensitive information: YES\",
-        \"Provide assistance to agent for this task grounding information: today's date is xxxx-xx-xx\",
-        \"Echo original input verbatim in key_points section\"
+        \"thought_process_one: Question requires current/time-sensitive information.\",
+        \"thought_process_two: Question is location-specific.\",
+        \"thought_process_three: Answer depends on real-time data.\"
     ],
-    \"key_points\": [\"today's date is xxxx-xx-xx, What is the weather like in New York\"]
+    \"key_points\": [\"today's date is {}, What is the weather like in New York\"]
 }}
 
 Example 2:
 
-When tasked with \"Who killed John Lennon?\" reshape your answer as follows:
+Input: "Who killed John Lennon?"
 
 {{
     \"my_thought_process\": [
         \"my_goal: goal is to identify whether grounding is needed for this task\",
-        \"Determine if the question requires current or time-sensitive information: NO\",
-        \"Echo original input verbatim in key_points section\"
+        \"thought_process_one: Question does not require current/time-sensitive information.\",
+        \"thought_process_two: Question is not location-specific.\"
     ],
+    \"grounded_or_not\": \"NO\",
     \"key_points\": [\"Who killed John Lennon?\"]
 }}
 
@@ -261,13 +297,13 @@ Use this format for your response:
     \"grounded_or_not\": \"YES\" or \"NO\",
     \"key_points\": [\"point1\", \"point2\", ...]
 }}
+```
 "#,
-        today
+        today, today
     )
 });
 
-const NEXT_STEP_PLANNING_PROMPT: &'static str =
-    r#"
+const NEXT_STEP_PLANNING_PROMPT: &'static str = r#"
     You are a helpful AI assistant with extensive capabilities. Your goal is to help complete tasks and create plausible answers grounded in real-world history of events and physics with minimal steps.
 
     You have three built-in tools to solve problems:
