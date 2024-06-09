@@ -186,7 +186,6 @@ async fn main() -> anyhow::Result<()> {
         }
 
         println!("\n[Bot]:");
-
         let task_vec = user_proxy
             .next_step_planning(&mut chat_request, &user_input)
             .await;
