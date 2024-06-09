@@ -25,6 +25,33 @@ lazy_static! {
 
     pub static ref TINY_LLAMA_TOOL_CALL: String =
         r#"
+[INST] <<SYS>>
+You are a helpful assistant with access to the following functions. Use them if required -
+{
+    "name": "send_email",
+    "description": "Send an email for the given recipient and message",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "recipient": {
+                "type": "string",
+                "description": "The email address of the recipient"
+            },
+            "message": {
+                "type": "string",
+                "description": "The message to send"
+            }
+        },
+        "required": [
+            "recipient",
+            "message"
+        ]
+    }
+}
+    <</SYS>>\n
+    "#.to_string();
+    pub static ref save_TINY_LLAMA_TOOL_CALL: String =
+        r#"
 <|start_header_id|>system<|end_header_id|>
 
 You are a helpful assistant with access to the following functions. Use them if required -

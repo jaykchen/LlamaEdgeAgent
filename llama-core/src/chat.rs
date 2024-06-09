@@ -929,8 +929,14 @@ pub async fn chat_completions_inject(
     let mut metadata = update_metadata(chat_request).await?;
 
     // build prompt
-    let (_, avaible_completion_tokens) = build_prompt(model_name.as_ref(), chat_request)
+    let (p, avaible_completion_tokens) = build_prompt(model_name.as_ref(), chat_request)
         .map_err(|e| LlamaCoreError::Operation(format!("Failed to build prompt. {}", e)))?;
+
+    println!(
+        "prompt built: {:?}, avaible_completion_tokens: {:?}",
+        p.clone(),
+        avaible_completion_tokens.clone()
+    );
 
     if metadata.log_prompts {
         print_log_begin_separator("PROMPT", Some("*"), None);
@@ -939,11 +945,42 @@ pub async fn chat_completions_inject(
     }
 
     // update metadata n_predict
-    update_n_predict(chat_request, &mut metadata, avaible_completion_tokens).await?;
+    // update_n_predict(chat_request, &mut metadata, avaible_completion_tokens).await?;
 
     // set prompt
-    set_prompt(model_name.as_ref(), &prompt)?;
 
+    let hard_prompt = r#"
+[INST] <<SYS>>
+You are a helpful assistant with access to the following functions. Use them if required -
+{
+    "name": "send_email",
+    "description": "Send an email for the given recipient and message",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "recipient": {
+                "type": "string",
+                "description": "The email address of the recipient"
+            },
+            "message": {
+                "type": "string",
+                "description": "The message to send"
+            }
+        },
+        "required": [
+            "recipient",
+            "message"
+        ]
+    }
+}
+    <</SYS>>\n
+
+    send an email to jaykchen@gmail.com to register for NEURIPS 2024 ontime. [/INST] 
+    "#
+    .to_string();
+
+    // set prompt
+    set_prompt(model_name.as_ref(), &hard_prompt)?;
     // compute
     compute(model_name.as_ref(), id)
 }
@@ -1476,66 +1513,66 @@ fn build_prompt(
     let max_prompt_tokens = ctx_size * 4 / 5;
 
     // loop {
-        // build prompt
-        let prompt = match chat_prompt.build(&mut chat_request.messages) {
-            Ok(prompt) => prompt,
-            Err(e) => {
-                return Err(LlamaCoreError::Operation(format!(
-                    "Fail to build chat prompts: {msg}",
-                    msg = e
-                )))
-            }
-        };
+    // build prompt
+    let prompt = match chat_prompt.build(&mut chat_request.messages) {
+        Ok(prompt) => prompt,
+        Err(e) => {
+            return Err(LlamaCoreError::Operation(format!(
+                "Fail to build chat prompts: {msg}",
+                msg = e
+            )))
+        }
+    };
 
-        // set prompt
-        set_prompt(model_name, &prompt)?;
+    // set prompt
+    set_prompt(model_name, &prompt)?;
 
-        // Retrieve the number of prompt tokens.
-        // let token_info = get_token_info_by_graph_name(model_name)?;
+    // Retrieve the number of prompt tokens.
+    // let token_info = get_token_info_by_graph_name(model_name)?;
 
-        return Ok((prompt, ctx_size - max_prompt_tokens))
-        // match token_info.prompt_tokens > max_prompt_tokens {
-        //     true => {
-        //         match chat_request.messages[0].role() {
-        //             ChatCompletionRole::System => {
-        //                 if chat_request.messages.len() >= 4 {
-        //                     if chat_request.messages[1].role() == ChatCompletionRole::User {
-        //                         chat_request.messages.remove(1);
-        //                     }
-        //                     if chat_request.messages[1].role() == ChatCompletionRole::Assistant {
-        //                         chat_request.messages.remove(1);
-        //                     }
-        //                 } else if chat_request.messages.len() == 3
-        //                     && chat_request.messages[1].role() == ChatCompletionRole::User
-        //                 {
-        //                     chat_request.messages.remove(1);
-        //                 } else {
-        //                     return Ok((prompt, ctx_size - max_prompt_tokens));
-        //                 }
-        //             }
-        //             ChatCompletionRole::User => {
-        //                 if chat_request.messages.len() >= 3 {
-        //                     if chat_request.messages[0].role() == ChatCompletionRole::User {
-        //                         chat_request.messages.remove(0);
-        //                     }
-        //                     if chat_request.messages[0].role() == ChatCompletionRole::Assistant {
-        //                         chat_request.messages.remove(0);
-        //                     }
-        //                 } else if chat_request.messages.len() == 2
-        //                     && chat_request.messages[0].role() == ChatCompletionRole::User
-        //                 {
-        //                     chat_request.messages.remove(0);
-        //                 } else {
-        //                     return Ok((prompt, ctx_size - max_prompt_tokens));
-        //                 }
-        //             }
-        //             _ => panic!("Found a unsupported chat message role!"),
-        //         }
+    return Ok((prompt, ctx_size - max_prompt_tokens));
+    // match token_info.prompt_tokens > max_prompt_tokens {
+    //     true => {
+    //         match chat_request.messages[0].role() {
+    //             ChatCompletionRole::System => {
+    //                 if chat_request.messages.len() >= 4 {
+    //                     if chat_request.messages[1].role() == ChatCompletionRole::User {
+    //                         chat_request.messages.remove(1);
+    //                     }
+    //                     if chat_request.messages[1].role() == ChatCompletionRole::Assistant {
+    //                         chat_request.messages.remove(1);
+    //                     }
+    //                 } else if chat_request.messages.len() == 3
+    //                     && chat_request.messages[1].role() == ChatCompletionRole::User
+    //                 {
+    //                     chat_request.messages.remove(1);
+    //                 } else {
+    //                     return Ok((prompt, ctx_size - max_prompt_tokens));
+    //                 }
+    //             }
+    //             ChatCompletionRole::User => {
+    //                 if chat_request.messages.len() >= 3 {
+    //                     if chat_request.messages[0].role() == ChatCompletionRole::User {
+    //                         chat_request.messages.remove(0);
+    //                     }
+    //                     if chat_request.messages[0].role() == ChatCompletionRole::Assistant {
+    //                         chat_request.messages.remove(0);
+    //                     }
+    //                 } else if chat_request.messages.len() == 2
+    //                     && chat_request.messages[0].role() == ChatCompletionRole::User
+    //                 {
+    //                     chat_request.messages.remove(0);
+    //                 } else {
+    //                     return Ok((prompt, ctx_size - max_prompt_tokens));
+    //                 }
+    //             }
+    //             _ => panic!("Found a unsupported chat message role!"),
+    //         }
 
-        //         continue;
-        //     }
-        //     false => return Ok((prompt, ctx_size - max_prompt_tokens)),
-        // }
+    //         continue;
+    //     }
+    //     false => return Ok((prompt, ctx_size - max_prompt_tokens)),
+    // }
     // }
 }
 

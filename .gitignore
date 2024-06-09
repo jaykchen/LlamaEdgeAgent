@@ -13,3 +13,7 @@ agent/.env
 agent/Cargo.lock
 tinyllama-1.1b-2.5t-chat-and-function-calling.Q8_0.gguf
 autogen_rust.wasm
+.idea/vcs.xml
+.idea/modules.xml
+.idea/LlamaEdgeAgent.iml
+.idea/.gitignore
